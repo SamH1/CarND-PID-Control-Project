@@ -4,6 +4,7 @@
 #include "PID.h"
 #include <math.h>
 
+
 // for convenience
 using json = nlohmann::json;
 
@@ -28,6 +29,52 @@ std::string hasData(std::string s) {
   return "";
 }
 
+// global parameters for Twiddle algorithm
+bool use_twiddle = true;
+long timer = 0;
+long tt = 0;
+double err = 1000;
+double tot_str;
+double p[] = {0.1,0,0.9};
+double dp[] = {.01,0,.01};
+double best_err = err;
+int step = 0;
+int p_index = 0;
+
+//twiddle
+void twiddle (){
+        
+    if (step == 0){
+      p[p_index] += dp[p_index];
+      //pid.Init(-p[0], -p[1], -p[2]);
+      step = 1;
+    } else if (step == 1){
+        if (err < best_err){
+            best_err = err;
+            dp[p_index] *= 1.1;
+            p_index = (p_index + 1) % 3;
+            step = 0;
+        } else {
+            p[p_index] -= 2*dp[p_index];
+            //pid.Init(-p[0], -p[1], -p[2]);
+            step = 2;
+        }       
+    } else {
+        if (err < best_err){
+            best_err = err;
+            dp[p_index] *= 1.1;
+            p_index = (p_index + 1) % 3;
+            step = 0;
+        } else {
+            p[p_index] += dp[p_index];
+            dp[p_index] *= 0.9;
+            //pid.Init(-p[0], -p[1], -p[2]);
+            p_index = (p_index + 1) % 3;
+            step = 0;
+        } 
+    }
+}
+
 int main()
 {
   uWS::Hub h;
@@ -43,6 +90,7 @@ int main()
     // "42" at the start of the message means there's a websocket message event.
     // The 4 signifies a websocket message
     // The 2 signifies a websocket event
+    timer += 1;
     if (length && length > 2 && data[0] == '4' && data[1] == '2')
     {
       auto s = hasData(std::string(data).substr(0, length));
@@ -63,6 +111,22 @@ int main()
           */
           pid.UpdateError(cte);
           steer_value = pid.TotalError();
+          err += std::abs(pid.p_error);
+          tot_str += std::abs(steer_value);
+
+          if (timer == 500 and use_twiddle){
+            std::cout << std::fixed;
+            std::cout << std::setprecision(4);           
+            std::cout << "\n----total_steering: " << tot_str << " error: " << pid.p_error << ", " << pid.i_error << ", " << pid.d_error << ", "<< pid.Kp * pid.p_error + pid.Ki * pid.i_error + pid.Kd * pid.d_error << std::endl;
+            std::cout << "----iteration: " << tt << " err: " << err  << " p[" << pid.Kp << ", " << pid.Ki << ", " << pid.Kd << "]\n" << std::endl;
+            twiddle();
+            pid.Init(-p[0], -p[1], -p[2]);
+            if (p_index == 1) {p_index = 2;}
+            timer = 0;
+            err = 0;
+            tot_str = 0;
+            tt += 1;
+          }
           // DEBUG
           std::cout << "CTE: " << cte << " Steering Value: " << steer_value << std::endl;
 
